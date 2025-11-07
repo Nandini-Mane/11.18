@@ -51,38 +51,46 @@ jobs:
     # Runs after both deployment and tagging jobs attempt to run
     needs: [simple_deployment_pipeline, tag_release]
     runs-on: ubuntu-latest
-    # The 'always()' condition ensures this job runs even if a dependency fails
     if: ${{ always() }} 
     steps:
-      - name: Build Success Notification
-        # Condition: All dependencies succeeded AND the deploy was not skipped
-        if: ${{ success() && needs.tag_release.result == 'success' && env.SKIP_DEPLOY != 'true' }}
-        # FIX: Using the rtCamp action
-        uses: rtCamp/action-discord-notify@v2
-        env:
-          # Note the different environment variable names for this action:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USERNAME: GitHub Actions
-          DISCORD_COLOR: 00FF00 # Green
-          DISCORD_TITLE: "🚀 SUCCESS: Deployment and Tagging Complete!"
-          DISCORD_MESSAGE: "A new version has been deployed and tagged on the main branch."
-
-      - name: Build Failure Notification
-        # Condition: Any dependency failed or was cancelled
-        if: ${{ failure() || cancelled() }}
-        # FIX: Using the rtCamp action
-        uses: rtCamp/action-discord-notify@v2
-        env:
-          # Note the different environment variable names for this action:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USERNAME: GitHub Actions
-          DISCORD_COLOR: FF0000 # Red
-          DISCORD_TITLE: "❌ FAILURE: Deployment Pipeline Failed"
-          # We use the full commit context to provide detailed error info
-          DISCORD_MESSAGE: |
-            Pipeline failed on commit: **${{ github.sha }}**
-            Commit Message: **${{ github.event.head_commit.message }}**
-            Triggered by: **${{ github.actor }}**
-            Job Status: **${{ needs.simple_deployment_pipeline.result }}**
+      - name: Send Discord Notification via cURL
+        # This step uses a shell script to determine success/failure and build the payload.
+        run: |
+          # 1. Determine Status and Payload variables
+          STATUS="${{ needs.simple_deployment_pipeline.result }}"
+          
+          if [ "$STATUS" == "success" ] && [ "${{ needs.tag_release.result }}" == "success" ] && [ "${{ env.SKIP_DEPLOY }}" != "true" ]; then
+            COLOR="65280" # Green (00FF00)
+            TITLE="🚀 SUCCESS: Deployment and Tagging Complete!"
+            DESCRIPTION="A new version has been deployed and tagged on the main branch."
+          else
+            COLOR="16711680" # Red (FF0000)
+            TITLE="❌ FAILURE: Deployment Pipeline Failed"
             
-            [View Workflow Run Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            # Construct detailed failure message
+            DESCRIPTION="Pipeline failed on commit: **${{ github.sha }}**\n"
+            DESCRIPTION+="Commit Message: **${{ github.event.head_commit.message }}**\n"
+            DESCRIPTION+="Triggered by: **${{ github.actor }}**\n"
+            DESCRIPTION+="Job Status: **$STATUS**\n"
+            DESCRIPTION+="[View Workflow Run Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          fi
+
+          # 2. Construct the full JSON payload
+          PAYLOAD='{
+            "username": "GitHub Actions Bot",
+            "embeds": [
+              {
+                "title": "'"$TITLE"'",
+                "description": "'"$DESCRIPTION"'",
+                "color": "'"$COLOR"'"
+              }
+            ]
+          }'
+
+          # 3. Send the notification using cURL
+          curl -X POST -H "Content-Type: application/json" \
+          --data "$PAYLOAD" \
+          "${{ secrets.DISCORD_WEBHOOK }}"
+        
+        # We only skip if the simple_deployment_pipeline failed (to avoid redundant output if the runner failed early)
+        if: ${{ needs.simple_deployment_pipeline.result != 'skipped' }}
