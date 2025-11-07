@@ -47,32 +47,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT_BUMP: patch
           
-  notify:
-    # Runs after both deployment and tagging jobs attempt to run
-    needs: [simple_deployment_pipeline, tag_release]
-    runs-on: ubuntu-latest
-    # The 'always()' condition ensures this job runs even if a dependency fails
-    if: ${{ always() }} 
+ notify:
+    # ... (needs and if sections remain the same) ...
     steps:
       - name: Build Success Notification
-        # Condition: All dependencies succeeded AND the deploy was not skipped
-        if: ${{ success() && needs.tag_release.result == 'success' && env.SKIP_DEPLOY != 'true' }}
-        uses: sarisia/actions-discord-webhook@v1.1.4 
-        with:
-          webhook: ${{ secrets.DISCORD_WEBHOOK }}
-          status: success
-          title: "🚀 SUCCESS: Deployment and Tagging Complete!"
-          description: "A new version has been deployed and tagged on the main branch."
+        # ... (Success step remains the same) ...
 
       - name: Build Failure Notification
-        # Condition: Any dependency failed or was cancelled
+        # Runs if the previous jobs failed or were cancelled
         if: ${{ failure() || cancelled() }}
-        uses: sarisia/actions-discord-webhook@v1.1.4 
+        uses: tsukhu/discord-webhook@v2.0.0
         with:
-          webhook: ${{ secrets.DISCORD_WEBHOOK }}
-          status: failure
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK }}
           title: "❌ FAILURE: Deployment Pipeline Failed"
-          description: |
+          # ⬇️ ADD THIS LINE ⬇️
+          no-format: true
+          # ⬆️ ADD THIS LINE ⬆️
+          message: |
             Pipeline failed on commit: **${{ github.sha }}**
             Commit Message: **${{ github.event.head_commit.message }}**
             Triggered by: **${{ github.actor }}**
