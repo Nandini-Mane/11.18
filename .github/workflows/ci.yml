@@ -1,0 +1,81 @@
+name: Deployment pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize]
+
+env:
+  # Condition to skip deploy/tag if commit message contains #skip
+  SKIP_DEPLOY: ${{ github.event_name == 'push' && contains(join(github.event.commits.*.message, ' '), '#skip') }}
+
+jobs:
+  simple_deployment_pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Tests (Status Check)
+        run: echo "Running tests..."
+
+      - name: Deploy to Production
+        # Only deploy on main PUSH AND if the SKIP_DEPLOY variable is NOT true
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && env.SKIP_DEPLOY != 'true' }}
+        run: echo "🚀 Deploying code to production on main branch!"
+
+  tag_release:
+    needs: [simple_deployment_pipeline]
+    runs-on: ubuntu-latest
+    # Grant permissions needed for tagging action
+    permissions:
+      contents: write 
+    steps:
+      - name: Checkout code (with history for tagging)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        # Only tag on main PUSH AND if the SKIP_DEPLOY variable is NOT true
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && env.SKIP_DEPLOY != 'true' }}
+        uses: anothrNick/github-tag-action@1.64.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch
+          
+  notify:
+    # Runs after both deployment and tagging jobs attempt to run
+    needs: [simple_deployment_pipeline, tag_release]
+    runs-on: ubuntu-latest
+    # The 'always()' condition ensures this job runs even if a dependency fails
+    if: ${{ always() }} 
+    steps:
+      - name: Build Success Notification
+        # Condition: All dependencies succeeded AND the deploy was not skipped
+        if: ${{ success() && needs.tag_release.result == 'success' && env.SKIP_DEPLOY != 'true' }}
+        uses: sarisia/actions-discord-webhook@v1.1.4 
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          status: success
+          title: "🚀 SUCCESS: Deployment and Tagging Complete!"
+          description: "A new version has been deployed and tagged on the main branch."
+
+      - name: Build Failure Notification
+        # Condition: Any dependency failed or was cancelled
+        if: ${{ failure() || cancelled() }}
+        uses: sarisia/actions-discord-webhook@v1.1.4 
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          status: failure
+          title: "❌ FAILURE: Deployment Pipeline Failed"
+          description: |
+            Pipeline failed on commit: **${{ github.sha }}**
+            Commit Message: **${{ github.event.head_commit.message }}**
+            Triggered by: **${{ github.actor }}**
+            Job Status: **${{ needs.simple_deployment_pipeline.result }}**
+            
+            [View Workflow Run Details](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
