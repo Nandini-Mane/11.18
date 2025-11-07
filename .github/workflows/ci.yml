@@ -57,24 +57,29 @@ jobs:
       - name: Build Success Notification
         # Condition: All dependencies succeeded AND the deploy was not skipped
         if: ${{ success() && needs.tag_release.result == 'success' && env.SKIP_DEPLOY != 'true' }}
-        # FIX: Using the verified alternative action
-        uses: tsukhu/discord-webhook@v2.0.0
-        with:
-          webhook-url: ${{ secrets.DISCORD_WEBHOOK }} 
-          message: "🚀 **SUCCESS:** Deployment and Tagging Complete! A new version has been deployed and tagged on the main branch."
-          title: "Deployment Pipeline"
+        # FIX: Using the rtCamp action
+        uses: rtCamp/action-discord-notify@v2
+        env:
+          # Note the different environment variable names for this action:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USERNAME: GitHub Actions
+          DISCORD_COLOR: 00FF00 # Green
+          DISCORD_TITLE: "🚀 SUCCESS: Deployment and Tagging Complete!"
+          DISCORD_MESSAGE: "A new version has been deployed and tagged on the main branch."
 
       - name: Build Failure Notification
         # Condition: Any dependency failed or was cancelled
         if: ${{ failure() || cancelled() }}
-        # FIX: Using the verified alternative action
-        uses: tsukhu/discord-webhook@v2.0.0
-        with:
-          webhook-url: ${{ secrets.DISCORD_WEBHOOK }} 
-          title: "❌ FAILURE: Deployment Pipeline Failed"
-          # CRITICAL FIX: Ensures multi-line message is parsed correctly
-          no-format: true
-          message: |
+        # FIX: Using the rtCamp action
+        uses: rtCamp/action-discord-notify@v2
+        env:
+          # Note the different environment variable names for this action:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USERNAME: GitHub Actions
+          DISCORD_COLOR: FF0000 # Red
+          DISCORD_TITLE: "❌ FAILURE: Deployment Pipeline Failed"
+          # We use the full commit context to provide detailed error info
+          DISCORD_MESSAGE: |
             Pipeline failed on commit: **${{ github.sha }}**
             Commit Message: **${{ github.event.head_commit.message }}**
             Triggered by: **${{ github.actor }}**
