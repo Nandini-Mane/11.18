@@ -9,7 +9,7 @@ on:
     types: [opened, synchronize]
 
 env:
-  # Condition to skip deploy/tag if commit message contains #skip
+  # Check if the event is a 'push' AND if the combined commit messages contain '#skip'
   SKIP_DEPLOY: ${{ github.event_name == 'push' && contains(join(github.event.commits.*.message, ' '), '#skip') }}
 
 jobs:
@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Tests (Status Check)
+        # Assuming you reverted the failure test and it is now passing again
         run: echo "Running tests..."
 
       - name: Deploy to Production
@@ -30,7 +31,7 @@ jobs:
   tag_release:
     needs: [simple_deployment_pipeline]
     runs-on: ubuntu-latest
-    # Grant permissions needed for tagging action
+    # CRITICAL FIX: Grant permissions needed for the tagging action
     permissions:
       contents: write 
     steps:
@@ -47,22 +48,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEFAULT_BUMP: patch
           
- notify:
-    # ... (needs and if sections remain the same) ...
+  notify:
+    # Runs after both deployment and tagging jobs attempt to run
+    needs: [simple_deployment_pipeline, tag_release]
+    runs-on: ubuntu-latest
+    # The 'always()' condition ensures this job runs even if a dependency fails
+    if: ${{ always() }} 
     steps:
       - name: Build Success Notification
-        # ... (Success step remains the same) ...
-
-      - name: Build Failure Notification
-        # Runs if the previous jobs failed or were cancelled
-        if: ${{ failure() || cancelled() }}
+        # Condition: All dependencies succeeded AND the deploy was not skipped
+        if: ${{ success() && needs.tag_release.result == 'success' && env.SKIP_DEPLOY != 'true' }}
+        # FIX: Using the verified alternative action
         uses: tsukhu/discord-webhook@v2.0.0
         with:
-          webhook-url: ${{ secrets.DISCORD_WEBHOOK }}
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK }} # Note: webhook-url input name
+          message: "🚀 **SUCCESS:** Deployment and Tagging Complete! A new version has been deployed and tagged on the main branch."
+          title: "Deployment Pipeline"
+
+      - name: Build Failure Notification
+        # Condition: Any dependency failed or was cancelled
+        if: ${{ failure() || cancelled() }}
+        # FIX: Using the verified alternative action
+        uses: tsukhu/discord-webhook@v2.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK }} # Note: webhook-url input name
           title: "❌ FAILURE: Deployment Pipeline Failed"
-          # ⬇️ ADD THIS LINE ⬇️
+          # CRITICAL FIX: Add no-format for multi-line messages
           no-format: true
-          # ⬆️ ADD THIS LINE ⬆️
           message: |
             Pipeline failed on commit: **${{ github.sha }}**
             Commit Message: **${{ github.event.head_commit.message }}**
